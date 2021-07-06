@@ -91,7 +91,7 @@ class GitObject(ABC):
 class GitBlob(GitObject):
     blobdata: bytes = None
 
-    def serialize(self):
+    def serialize(self) -> bytes:
         return self.blobdata
 
     @classmethod
@@ -101,7 +101,7 @@ class GitBlob(GitObject):
 
 class GitCommit(GitObject):
 
-    def serialize(self):
+    def serialize(self) -> bytes:
         pass
 
     @classmethod
@@ -112,11 +112,11 @@ class GitCommit(GitObject):
 
 class GitTree(GitObject):
 
-    def serialize(self):
+    def serialize(self) -> bytes:
         pass
 
 
 class GitTag(GitObject):
 
-    def serialize(self):
+    def serialize(self) -> bytes:
         pass

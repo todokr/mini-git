@@ -8,7 +8,7 @@ import zlib
 
 import click
 
-from commands import cmd_init
+from commands import cmd_init, cmd_cat_file
 from models import GitRepository
 
 @click.group()
@@ -30,9 +30,8 @@ def init(path: str):
 @cmd.command(name='cat-file')
 @click.argument('sha')
 def cat_file(sha: str):
-  repo = GitRepository.load(os.getcwd())
-  obj = repo.load_object(sha)
-  click.echo(obj.serialize().decode('utf-8'))
+  result = cmd_cat_file.run(os.getcwd(), sha)
+  click.echo(result)
 
 @cmd.command()
 def add():
