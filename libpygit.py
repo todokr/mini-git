@@ -8,7 +8,7 @@ import zlib
 
 import click
 
-from commands import cmd_init, cmd_cat_file
+import commands
 from models import GitRepository
 
 @click.group()
@@ -18,20 +18,33 @@ def cmd():
 @cmd.command()
 @click.argument('path', required=False)
 def init(path: str):
-  cwd = os.getcwd()
-  if not path:
-    p = cwd
-  else:
-    p = os.path.join(cwd, path)
+    cwd = os.getcwd()
+    if not path:
+        p = cwd
+    else:
+        p = os.path.join(cwd, path)
 
-  cmd_init.run(p)
+    commands.run_init(p)
 
 
 @cmd.command(name='cat-file')
 @click.argument('sha')
 def cat_file(sha: str):
-  result = cmd_cat_file.run(os.getcwd(), sha)
-  click.echo(result)
+    result = commands.run_cat_file(os.getcwd(), sha)
+    click.echo(result)
+
+@cmd.command(name='hash-object')
+@click.option('--type', '-t', type=click.Choice(['blob', 'commit', 'tag', 'tree']), default='blob')
+@click.option('--write', '-w', type=bool, default=False)
+@click.argument('file', type=str, required=True)
+def hash_object(type, write, file):
+    sha = commands.run_hash_object(os.getcwd(), type, write, file)
+    click.echo(sha)
+
+@cmd.command(name='log')
+@click.argument('sha')
+def log(sha):
+    commands.run_log(os.getcwd(), sha)
 
 @cmd.command()
 def add():
@@ -45,14 +58,6 @@ def checkout():
 @cmd.command()
 def commit():
   click.echo('commit')
-
-@cmd.command(name='hash-object')
-def hash_object():
-  click.echo('hash-object')
-
-@cmd.command()
-def log():
-  click.echo('log')
 
 @cmd.command(name='ls-tree')
 def ls_tree():

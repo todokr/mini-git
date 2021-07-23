@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 import os
 import configparser
+import collections
 from configparser import ConfigParser
 from dataclasses import dataclass
 import zlib
@@ -67,16 +68,35 @@ class GitRepository:
             if size != (len(raw) - y - 1):
                 raise Exception(f'Malformed object {sha}: bad length')
 
-            if   object_type == b'commit': c = GitCommit
-            elif object_type == b'tree'  : c = GitTree
-            elif object_type == b'tag'   : c = GitTag
-            elif object_type == b'blob'  : c = GitBlob
-            else: raise Exception(f"Unknown git object. type={object_type.decode('ascii')}, sha={sha}")
+            try:
+                c = self._detect_cls(object_type)
+            except Exception as e:
+                raise Exception(f'{e}, sha:{sha}')
 
-            return c(raw[y+1:])
+            return c.deserialize(raw[y+1:])
+
+    def create_object_from_path(self, path: str, object_type: str):
+        try:
+            c = self._detect_cls(object_type.encode('ascii'))
+        except Exception as e:
+            raise Exception(f'{e}, path:{path}')
+        target_path = os.path.join(self.worktree, path)
+        return c.from_path(target_path)
+
+
+    def _detect_cls(self, object_type: str):
+        if   object_type == b'commit': c = GitCommit
+        elif object_type == b'tree'  : c = GitTree
+        elif object_type == b'tag'   : c = GitTag
+        elif object_type == b'blob'  : c = GitBlob
+        else: raise Exception(f"Unknown git object. type={object_type.decode('ascii')}")
+        return c
 
 
 class GitObject(ABC):
+    @property
+    def fmt(self):
+        pass
 
     @abstractmethod
     def serialize(self) -> bytes:
@@ -87,30 +107,57 @@ class GitObject(ABC):
     def deserialize(cls, data: bytes):
         pass
 
+    @classmethod
+    @abstractmethod
+    def from_path(cls, path: str):
+        pass
+
+
 @dataclass(frozen=True)
 class GitBlob(GitObject):
     blobdata: bytes = None
+
+    def fmt(self) -> bytes:
+        return b'blob'
 
     def serialize(self) -> bytes:
         return self.blobdata
 
     @classmethod
     def deserialize(cls, data):
-        print('blob object')
-        cls(data)
+        return cls(data)
 
+
+    @classmethod
+    def from_path(cls, path):
+        with open(path, 'rb') as f:
+            blobdata = f.read()
+            return cls(blobdata)
+
+@dataclass(frozen=True)
 class GitCommit(GitObject):
+    kvlm: dict
+
+    def fmt(self) -> bytes:
+        return b'commit'
 
     def serialize(self) -> bytes:
-        pass
+        return kvlm_serialize(self.kvlm)
 
     @classmethod
     def deserialize(cls, data: bytes):
-        print('deserialize commit')
-        cls()
+        kvlm = kvlm_parse(data)
+        return cls(kvlm)
+
+    @classmethod
+    def from_path(cls, path):
+        pass
 
 
 class GitTree(GitObject):
+
+    def fmt(self) -> bytes:
+        return b'tree'
 
     def serialize(self) -> bytes:
         pass
@@ -120,3 +167,72 @@ class GitTag(GitObject):
 
     def serialize(self) -> bytes:
         pass
+
+def kvlm_parse(raw, start=0, dct:dict=None) -> dict:
+    if not dct:
+        dct = collections.OrderedDict()
+        # You CANNOT declare the argument as dct=OrderedDict() or all
+        # call to the functions will endlessly grow the same dict.
+
+    # We search for the next space and the next newline.
+    spc = raw.find(b' ', start)
+    nl = raw.find(b'\n', start)
+
+    # If space appears before newline, we have a keyword.
+
+    # Base case
+    # =========
+    # If newline appears first (or there's no space at all, in which
+    # case find returns -1), we assume a blank line.  A blank line
+    # means the remainder of the data is the message.
+    if (spc < 0) or (nl < spc):
+        assert(nl == start)
+        dct[b''] = raw[start+1:]
+        return dct
+
+    # Recursive case
+    # ==============
+    # we read a key-value pair and recurse for the next.
+    key = raw[start:spc]
+
+    # Find the end of the value.  Continuation lines begin with a
+    # space, so we loop until we find a "\n" not followed by a space.
+    end = start
+    while True:
+        end = raw.find(b'\n', end+1)
+        if raw[end+1] != ord(' '): break
+
+    # Grab the value
+    # Also, drop the leading space on continuation lines
+    value = raw[spc+1:end].replace(b'\n ', b'\n')
+
+    # Don't overwrite existing data contents
+    if key in dct:
+        if type(dct[key]) == list:
+            dct[key].append(value)
+        else:
+            dct[key] = [ dct[key], value ]
+    else:
+        dct[key]=value
+
+    return kvlm_parse(raw, start=end+1, dct=dct)
+
+def kvlm_serialize(kvlm):
+    ret = b''
+
+    # Output fields
+    for k in kvlm.keys():
+        # Skip the message itself
+        if k == b'': continue
+        val = kvlm[k]
+        # Normalize to a list
+        if type(val) != list:
+            val = [ val ]
+
+        for v in val:
+            ret += k + b' ' + (v.replace(b'\n', b'\n ')) + b'\n'
+
+    # Append message
+    ret += b'\n' + kvlm[b'']
+
+    return ret
